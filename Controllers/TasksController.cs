@@ -9,6 +9,9 @@ using MimeKit;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using MailKit; // Для MessageSummaryItems
+<<<<<<<<< Temporary merge branch 1
+=========
+using ToDoListAPI.Models;
 
 namespace ToDoListAPI.Controllers
 {
