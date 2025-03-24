@@ -1,4 +1,4 @@
-name: CI/CD for ToDoListAPI
+name: CI/CD todolistapi
 
 on:
   push:
@@ -7,98 +7,56 @@ on:
     branches: [ CI/CD ]
 
 jobs:
-  build-and-deploy:
+  build-and-deploy-api:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Чекаут репозитория
+      # 1. Чекаут кода
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      # 2. Установка Docker Buildx
+      # 2. Настройка Docker Buildx
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v2
 
       # 3. Логин в Docker Hub
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 4. Сборка образа для ToDoListAPI
-      - name: Build ToDoListAPI Docker image
+      # 4. Сборка и пуш образа для todolistapi
+      - name: Build and push todolistapi Docker image
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd .
+          docker build -t yourusername/todolistapi:latest .
+          docker push yourusername/todolistapi:latest
 
-      # 5. Создание сети todo_network
-      - name: Create Docker network
+      # 5. Запуск API контейнера
+      - name: Run todolistapi container
         run: |
-          docker network create todo_network || true
+          docker run -d --name todolistapi \
+            -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" \
+            -p 5000:80 \
+            yourusername/todolistapi:latest
 
-      # 6. Запуск контейнера MSSQL в сети todo_network
-      - name: Run MSSQL container
+      # 6. Ожидание готовности контейнера
+      - name: Wait for API to be ready
         run: |
-          docker run -d --name todo_mssql --network todo_network -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
-          # Ждём 60 секунд, чтобы MSSQL успел запуститься
-          sleep 60
-          # Проверяем, что контейнер работает
-          docker ps | grep todo_mssql || (echo "MSSQL container failed to start" && exit 1)
-          # Проверяем логи на наличие ошибок
-          docker logs todo_mssql | grep "SQL Server is now ready for client connections" || (echo "MSSQL not ready, check logs for errors:" && docker logs todo_mssql && exit 1)
+          sleep 20  # Даем время на запуск сервиса
 
-      # 7. Применение миграций (опционально, если нужно)
-      - name: Apply database migrations
-        run: |
-          docker run --rm --network todo_network -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
-        continue-on-error: true
-
-      # 8. Запуск контейнера API в сети todo_network
-      - name: Run API container
-        run: |
-          docker run -d --name api --network todo_network -p 8090:8090 -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
-          # Даём время на запуск API
-          sleep 10
-
-      # 9. Запуск контейнера Blazor в сети todo_network
-      - name: Run Blazor container
-        run: |
-          docker run -d --name blazor --network todo_network -p 8091:8091 ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd
-          # Даём время на запуск Blazor
-          sleep 10
-
-      # 10. Проверка работоспособности API
+      # 7. Проверка работоспособности через curl
       - name: Test API endpoint
         run: |
-          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/swagger || exit 1
+          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:5000/api/health || exit 1
 
-      # 11. Проверка работоспособности Blazor
-      - name: Test Blazor endpoint
-        run: |
-          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8091 || exit 1
-
-      # 12. Остановка и удаление контейнеров
-      - name: Stop and remove containers
+      # 8. Остановка и удаление контейнера
+      - name: Cleanup API container
         if: always()
         run: |
-          docker stop todo_mssql api blazor || true
-          docker rm todo_mssql api blazor || true
+          docker stop todolistapi || true
+          docker rm -f todolistapi || true
 
-      # 13. Очистка локальных образов
-      - name: Clean up images
-        if: always()
-        run: |
-          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd || true
-          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd || true
-          docker rmi mcr.microsoft.com/mssql/server:2019-latest || true
-
-      # 14. Удаление сети todo_network
-      - name: Remove Docker network
-        if: always()
-        run: |
-          docker network rm todo_network || true
-
-      # 15. Пуш образа API на Docker Hub
-      - name: Push ToDoListAPI image to Docker Hub
-        run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
