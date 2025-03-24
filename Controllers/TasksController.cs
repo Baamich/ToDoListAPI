@@ -3,12 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using ToDoListAPI.Data;
 using ToDoListAPI.Models;
 using MailKit.Net.Smtp;
-using MailKit.Net.Imap; // Для IMAP
-using MailKit.Net.Pop3; // Для POP3
+using MailKit.Net.Imap;
+using MailKit.Net.Pop3;
 using MimeKit;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-using MailKit; // Для MessageSummaryItems
+using MailKit;
+using ToDoListAPI.Services;
+using System.Text.Json; // Для сериализации в JSON
 
 namespace ToDoListAPI.Controllers
 {
@@ -19,12 +21,18 @@ namespace ToDoListAPI.Controllers
         private readonly AppDbContext _context;
         private readonly SmtpSettings _smtpSettings;
         private readonly ILogger<TasksController> _logger;
+        private readonly WebSocketService _wsService; // Добавляем сервис WebSocket
 
-        public TasksController(AppDbContext context, IOptions<SmtpSettings> smtpSettings, ILogger<TasksController> logger)
+        public TasksController(
+            AppDbContext context,
+            IOptions<SmtpSettings> smtpSettings,
+            ILogger<TasksController> logger,
+            WebSocketService wsService) // Инжектируем WebSocketService
         {
             _context = context;
             _smtpSettings = smtpSettings.Value;
             _logger = logger;
+            _wsService = wsService;
         }
 
         // 1. Получить все задачи
@@ -43,7 +51,7 @@ namespace ToDoListAPI.Controllers
             return task;
         }
 
-        // 3. Добавить новую задачу (с отправкой уведомления на email через SMTP)
+        // 3. Добавить новую задачу (с отправкой уведомления на email и WebSocket)
         [HttpPost]
         public async Task<ActionResult<TaskItem>> CreateTask(TaskItem task, [FromQuery] string recipientEmail = null)
         {
@@ -55,10 +63,13 @@ namespace ToDoListAPI.Controllers
                 await SendMailAsync(task.Title, recipientEmail, "Новая задача создана");
             }
 
+            var message = JsonSerializer.Serialize(new { Action = "Add", Task = task });
+            await _wsService.Broadcast(message);
+
             return CreatedAtAction(nameof(GetTask), new { id = task.Id }, task);
         }
 
-        // 4. Обновить задачу (с отправкой уведомления на email через SMTP)
+        // 4. Обновить задачу (с отправкой уведомления на email и WebSocket)
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateTask(int id, TaskItem task, [FromQuery] string recipientEmail = null)
         {
@@ -72,10 +83,13 @@ namespace ToDoListAPI.Controllers
                 await SendMailAsync(task.Title, recipientEmail, "Задача обновлена");
             }
 
+            var message = JsonSerializer.Serialize(new { Action = "Update", Task = task });
+            await _wsService.Broadcast(message);
+
             return NoContent();
         }
 
-        // 5. Удалить задачу
+        // 5. Удалить задачу (с отправкой уведомления через WebSocket)
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteTask(int id)
         {
@@ -84,6 +98,9 @@ namespace ToDoListAPI.Controllers
 
             _context.Tasks.Remove(task);
             await _context.SaveChangesAsync();
+
+            var message = JsonSerializer.Serialize(new { Action = "Delete", TaskId = id });
+            await _wsService.Broadcast(message);
 
             return NoContent();
         }
@@ -114,7 +131,7 @@ namespace ToDoListAPI.Controllers
                     await client.AuthenticateAsync(_smtpSettings.SenderEmail, _smtpSettings.SenderPassword);
 
                     _logger.LogInformation("Отправка письма на {RecipientEmail} для задачи {TaskId}", recipientEmail, taskId);
-                    await client.SendAsync(message); // Используем SendAsync из MailKit
+                    await client.SendAsync(message);
                     _logger.LogInformation("Письмо успешно отправлено на {RecipientEmail} для задачи {TaskId}", recipientEmail, taskId);
 
                     await client.DisconnectAsync(true);
