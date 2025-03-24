@@ -19,7 +19,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      # 3. Авторизация в Docker Hub с правильными именами секретов
+      # 3. Авторизация в Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
@@ -32,24 +32,29 @@ jobs:
           docker build -t baamich/todolistapi:latest .
           docker push baamich/todolistapi:latest
 
-      # 5. Запуск контейнера API на порту 8090:8090
+      # 5. Запуск контейнера API на порту 8090:80
       - name: Run todolistapi container
         run: |
           docker run -d --name todolistapi \
             -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" \
-            -p 8090:8090 \
+            -p 8090:80 \
             baamich/todolistapi:latest
 
-      # 6. Ожидание запуска сервиса
-      - name: Wait for API to be ready
-        run: sleep 20
+      # 6. Вывод логов контейнера для отладки
+      - name: Show container logs
+        run: |
+          docker logs todolistapi
 
-      # 7. Проверка эндпойнта API на порту 8090
+      # 7. Ожидание запуска сервиса
+      - name: Wait for API to be ready
+        run: sleep 30
+
+      # 8. Проверка эндпойнта API на порту 8090
       - name: Test API endpoint
         run: |
           curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/health || exit 1
 
-      # 8. Очистка после тестов
+      # 9. Очистка после тестов
       - name: Cleanup API container
         if: always()
         run: |
