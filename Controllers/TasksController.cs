@@ -261,5 +261,10 @@ namespace ToDoListAPI.Controllers
                 throw;
             }
         }
+        [HttpGet("health")]
+        public IActionResult HealthCheck()
+        {
+            return Ok("API is running");
+        }
     }
 }
