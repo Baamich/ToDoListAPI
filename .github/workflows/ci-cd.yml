@@ -19,77 +19,69 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. Кэширование Docker-слоёв
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      # 4. Логин в Docker Hub
+      # 3. Логин в Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 5. Сборка образа для ToDoListAPI с кэшированием
+      # 4. Сборка образа для ToDoListAPI
       - name: Build ToDoListAPI Docker image
         run: |
-          docker buildx build \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd \
-            --push \
-            .
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd .
 
-      # 6. Запуск контейнера MSSQL (официальный образ)
+      # 5. Запуск контейнера MSSQL с проверкой готовности
       - name: Run MSSQL container
         run: |
-          docker run -d --name mssql -e ACCEPT_EULA=Y -e SA_PASSWORD=YourStrong@Passw0rd -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
-          # Даём время на запуск MSSQL
-          sleep 30
+          docker run -d --name mssql -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+          # Ждём, пока MSSQL не будет готов
+          for i in {1..30}; do
+            docker exec mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P L1234qwer% -Q "SELECT 1" && break
+            echo "MSSQL not ready yet, waiting..."
+            sleep 2
+          done
+          # Проверяем, что MSSQL запустился
+          docker exec mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P L1234qwer% -Q "SELECT 1" || exit 1
 
-      # 7. Применение миграций (опционально, если нужно)
+      # 6. Применение миграций (опционально, если нужно)
       - name: Apply database migrations
         run: |
-          docker run --rm --link mssql:mssql -e ConnectionStrings__DefaultConnection="Server=mssql;Database=ToDoListDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
+          docker run --rm --link mssql:mssql -e ConnectionStrings__DefaultConnection="Server=mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
         continue-on-error: true
 
-      # 8. Запуск контейнера API
+      # 7. Запуск контейнера API
       - name: Run API container
         run: |
-          docker run -d --name api -p 8090:8090 --link mssql:mssql -e ConnectionStrings__DefaultConnection="Server=mssql;Database=ToDoListDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
+          docker run -d --name api -p 8090:8090 --link mssql:mssql -e ConnectionStrings__DefaultConnection="Server=mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
           # Даём время на запуск API
           sleep 10
 
-      # 9. Запуск контейнера Blazor (подтягиваем образ из Docker Hub)
+      # 8. Запуск контейнера Blazor (подтягиваем образ из Docker Hub)
       - name: Run Blazor container
         run: |
           docker run -d --name blazor -p 8091:8091 ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd
           # Даём время на запуск Blazor
           sleep 10
 
-      # 10. Проверка работоспособности API
+      # 9. Проверка работоспособности API
       - name: Test API endpoint
         run: |
           curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/swagger || exit 1
 
-      # 11. Проверка работоспособности Blazor
+      # 10. Проверка работоспособности Blazor
       - name: Test Blazor endpoint
         run: |
           curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8091 || exit 1
 
-      # 12. Остановка и удаление контейнеров
+      # 11. Остановка и удаление контейнеров
       - name: Stop and remove containers
         if: always()
         run: |
           docker stop mssql api blazor || true
           docker rm mssql api blazor || true
 
-      # 13. Очистка локальных образов
+      # 12. Очистка локальных образов
       - name: Clean up images
         if: always()
         run: |
@@ -97,5 +89,7 @@ jobs:
           docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd || true
           docker rmi mcr.microsoft.com/mssql/server:2019-latest || true
 
-      # 14. Пуш образа API на Docker Hub (уже сделано в buildx build --push)
-      # Этот шаг больше не нужен, так как мы пушим сразу в шаге сборки
+      # 13. Пуш образа API на Docker Hub
+      - name: Push ToDoListAPI image to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
