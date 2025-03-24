@@ -3,14 +3,12 @@ using Microsoft.EntityFrameworkCore;
 using ToDoListAPI.Data;
 using ToDoListAPI.Models;
 using MailKit.Net.Smtp;
-using MailKit.Net.Imap; // Добавляем для IMAP
-using MailKit.Net.Pop3; // Добавляем для POP3
+using MailKit.Net.Imap; // Для IMAP
+using MailKit.Net.Pop3; // Для POP3
 using MimeKit;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using MailKit; // Для MessageSummaryItems
-using ToDoListAPI.Models;
-
 
 namespace ToDoListAPI.Controllers
 {
@@ -54,7 +52,7 @@ namespace ToDoListAPI.Controllers
 
             if (!string.IsNullOrEmpty(recipientEmail))
             {
-                await SendEmailAsync(task.Title, recipientEmail, "Новая задача создана");
+                await SendMailAsync(task.Title, recipientEmail, "Новая задача создана");
             }
 
             return CreatedAtAction(nameof(GetTask), new { id = task.Id }, task);
@@ -71,7 +69,7 @@ namespace ToDoListAPI.Controllers
 
             if (!string.IsNullOrEmpty(recipientEmail))
             {
-                await SendEmailAsync(task.Title, recipientEmail, "Задача обновлена");
+                await SendMailAsync(task.Title, recipientEmail, "Задача обновлена");
             }
 
             return NoContent();
@@ -99,8 +97,29 @@ namespace ToDoListAPI.Controllers
 
             try
             {
-                await SendEmailAsync(task.Title, recipientEmail, "Напоминание о задаче");
-                _logger.LogInformation("Письмо успешно отправлено на {RecipientEmail} для задачи {TaskId}", recipientEmail, taskId);
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("ToDoList App", _smtpSettings.SenderEmail));
+                message.To.Add(new MailboxAddress("", recipientEmail));
+                message.Subject = $"Напоминание о задаче: {task.Title}";
+
+                var bodyBuilder = new BodyBuilder
+                {
+                    TextBody = $"Не забудьте выполнить задачу: {task.Title}\nОписание: {task.Description}"
+                };
+                message.Body = bodyBuilder.ToMessageBody();
+
+                using (var client = new SmtpClient())
+                {
+                    await client.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port, MailKit.Security.SecureSocketOptions.StartTls);
+                    await client.AuthenticateAsync(_smtpSettings.SenderEmail, _smtpSettings.SenderPassword);
+
+                    _logger.LogInformation("Отправка письма на {RecipientEmail} для задачи {TaskId}", recipientEmail, taskId);
+                    await client.SendAsync(message); // Используем SendAsync из MailKit
+                    _logger.LogInformation("Письмо успешно отправлено на {RecipientEmail} для задачи {TaskId}", recipientEmail, taskId);
+
+                    await client.DisconnectAsync(true);
+                }
+
                 return Ok("Письмо отправлено!");
             }
             catch (Exception ex)
@@ -120,20 +139,16 @@ namespace ToDoListAPI.Controllers
 
                 using (var client = new ImapClient())
                 {
-                    // Подключаемся к IMAP-серверу Mail.ru
-                    await client.ConnectAsync("imap.mail.ru", 993, true); // Порт 993 с SSL
+                    await client.ConnectAsync("imap.mail.ru", 993, true);
                     _logger.LogInformation("Подключение к IMAP-серверу imap.mail.ru:993 успешно");
 
-                    // Аутентификация
                     await client.AuthenticateAsync(_smtpSettings.SenderEmail, _smtpSettings.SenderPassword);
                     _logger.LogInformation("Аутентификация для {SenderEmail} успешна", _smtpSettings.SenderEmail);
 
-                    // Открываем папку "Входящие"
                     var inbox = client.Inbox;
                     await inbox.OpenAsync(FolderAccess.ReadOnly);
                     _logger.LogInformation("Папка Входящие открыта");
 
-                    // Получаем последние 5 писем (или меньше, если их меньше)
                     var messages = await inbox.FetchAsync(0, -1, MessageSummaryItems.Envelope);
                     var result = messages.Take(5).Select(m => new
                     {
@@ -165,19 +180,15 @@ namespace ToDoListAPI.Controllers
 
                 using (var client = new Pop3Client())
                 {
-                    // Подключаемся к POP3-серверу Mail.ru
-                    await client.ConnectAsync("pop.mail.ru", 995, true); // Порт 995 с SSL
+                    await client.ConnectAsync("pop.mail.ru", 995, true);
                     _logger.LogInformation("Подключение к POP3-серверу pop.mail.ru:995 успешно");
 
-                    // Аутентификация
                     await client.AuthenticateAsync(_smtpSettings.SenderEmail, _smtpSettings.SenderPassword);
                     _logger.LogInformation("Аутентификация для {SenderEmail} успешна", _smtpSettings.SenderEmail);
 
-                    // Получаем количество писем
                     int messageCount = await client.GetMessageCountAsync();
                     _logger.LogInformation("Найдено {MessageCount} писем", messageCount);
 
-                    // Загружаем последние 5 писем (или меньше, если их меньше)
                     var subjects = new List<object>();
                     for (int i = 0; i < Math.Min(5, messageCount); i++)
                     {
@@ -204,34 +215,33 @@ namespace ToDoListAPI.Controllers
         }
 
         // Вспомогательный метод для отправки писем через SMTP
-        private async Task SendEmailAsync(string taskTitle, string recipientEmail, string subjectPrefix)
+        private async Task SendMailAsync(string taskTitle, string recipientEmail, string subject)
         {
-            _logger.LogInformation("Начало отправки письма на {RecipientEmail}", recipientEmail);
-
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress(_smtpSettings.SenderName, _smtpSettings.SenderEmail));
-            message.To.Add(new MailboxAddress("", recipientEmail));
-            message.Subject = $"{subjectPrefix}: {taskTitle}";
-            message.Body = new TextPart("plain")
+            try
             {
-                Text = $"Задача: {taskTitle}\n" +
-                       $"Статус: {(subjectPrefix.Contains("создана") ? "Новая" : "Обновлена")}\n" +
-                       $"Дата: {DateTime.Now}"
-            };
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("ToDoList App", _smtpSettings.SenderEmail));
+                message.To.Add(new MailboxAddress("", recipientEmail));
+                message.Subject = subject;
 
-            using (var client = new SmtpClient())
+                var bodyBuilder = new BodyBuilder
+                {
+                    TextBody = $"Задача: {taskTitle}"
+                };
+                message.Body = bodyBuilder.ToMessageBody();
+
+                using (var client = new SmtpClient())
+                {
+                    await client.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port, MailKit.Security.SecureSocketOptions.StartTls);
+                    await client.AuthenticateAsync(_smtpSettings.SenderEmail, _smtpSettings.SenderPassword);
+                    await client.SendAsync(message);
+                    await client.DisconnectAsync(true);
+                }
+            }
+            catch (Exception ex)
             {
-                _logger.LogInformation("Подключение к SMTP-серверу {Host}:{Port}", _smtpSettings.Host, _smtpSettings.Port);
-                await client.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port, MailKit.Security.SecureSocketOptions.StartTls);
-
-                _logger.LogInformation("Аутентификация для {SenderEmail}", _smtpSettings.SenderEmail);
-                await client.AuthenticateAsync(_smtpSettings.SenderEmail, _smtpSettings.SenderPassword);
-
-                _logger.LogInformation("Отправка письма...");
-                await client.SendAsync(message);
-
-                _logger.LogInformation("Отключение от SMTP-сервера");
-                await client.DisconnectAsync(true);
+                _logger.LogError(ex, "Ошибка при отправке письма на {RecipientEmail}", recipientEmail);
+                throw;
             }
         }
     }

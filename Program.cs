@@ -16,11 +16,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Настройка CORS
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("AllowBlazor", builder =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        builder.WithOrigins("http://localhost:8091") 
+               .AllowAnyMethod()
+               .AllowAnyHeader();
     });
 });
 
@@ -34,17 +34,18 @@ builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpS
 
 var app = builder.Build();
 
-// Отключаем редирект на HTTPS в Docker (Production)
-if (!app.Environment.IsDevelopment())
+// Настраиваем middleware
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ToDoListAPI v1");
+    c.RoutePrefix = "swagger";
+});
 
-// Добавляем CORS, затем другие middleware
-app.UseCors("AllowAll");
+// Конвейер middleware
+app.UseRouting();
+app.UseCors("AllowBlazor");
 app.UseAuthorization();
-
 app.MapControllers();
 
 app.Run();
