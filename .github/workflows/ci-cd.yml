@@ -8,40 +8,39 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [todo_api, todo_blazor]
     steps:
-      - name: Checkout репозиторий
+      - name: Checkout Repository
         uses: actions/checkout@v4
+      
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Вход в Docker Hub
-        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-
-      - name: Сборка и пуш API
+      - name: Build and Push Docker Image
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest -f ToDoListAPI/Dockerfile .
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest -f ${{ matrix.service }}/Dockerfile ${{ matrix.service }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
 
-      - name: Сборка и пуш Blazor
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest -f ToDoListBlazor/Dockerfile .
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest
-
-  test-containers:
-    needs: build-and-push
+  deploy:
     runs-on: ubuntu-latest
+    needs: build-and-push
     steps:
-      - name: Создание сети (если не существует)
-        run: docker network create todo_network || true
-
-      - name: Запуск контейнеров
-        run: |
-          docker run -d --name todo_api --network todo_network -p 8090:8090 ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest
-          docker run -d --name todo_blazor --network todo_network -p 8091:80 ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest
-
-      - name: Проверка API
-        run: |
-          sleep 10
-          curl -f http://todo_api:8090/api/tasks/health || exit 1
-          curl -f http://todo_blazor:80 || exit 1
-
-      - name: Остановка и очистка контейнеров
-        run: docker stop todo_api todo_blazor && docker rm todo_api todo_blazor
+      - name: SSH into Server and Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest
+            docker network create todo_network || true
+            docker stop todo_api todo_blazor || true
+            docker rm todo_api todo_blazor || true
+            docker run -d --name todo_api --network todo_network -p 8090:8090 ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest
+            docker run -d --name todo_blazor --network todo_network -p 80:80 ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest
