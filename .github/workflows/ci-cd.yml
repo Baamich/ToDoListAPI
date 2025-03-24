@@ -31,18 +31,16 @@ jobs:
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd .
 
-      # 5. Запуск контейнера MSSQL с проверкой готовности
+      # 5. Запуск контейнера MSSQL с упрощённой проверкой готовности
       - name: Run MSSQL container
         run: |
           docker run -d --name mssql -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
-          # Ждём, пока MSSQL не будет готов
-          for i in {1..30}; do
-            docker exec mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P L1234qwer% -Q "SELECT 1" && break
-            echo "MSSQL not ready yet, waiting..."
-            sleep 2
-          done
-          # Проверяем, что MSSQL запустился
-          docker exec mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P L1234qwer% -Q "SELECT 1" || exit 1
+          # Ждём 60 секунд, чтобы MSSQL успел запуститься
+          sleep 60
+          # Проверяем, что контейнер работает
+          docker ps | grep mssql || (echo "MSSQL container failed to start" && exit 1)
+          # Проверяем логи на наличие ошибок
+          docker logs mssql | grep "SQL Server is now ready for client connections" || (echo "MSSQL not ready, check logs for errors:" && docker logs mssql && exit 1)
 
       # 6. Применение миграций (опционально, если нужно)
       - name: Apply database migrations
