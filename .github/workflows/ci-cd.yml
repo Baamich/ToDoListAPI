@@ -2,9 +2,9 @@ name: CI/CD for ToDoListAPI
 
 on:
   push:
-    branches: [ ci/cd ]
+    branches: [ CI/CD ]
   pull_request:
-    branches: [ ci/cd ]
+    branches: [ CI/CD ]
 
 jobs:
   build-and-deploy:
