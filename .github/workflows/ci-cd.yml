@@ -31,27 +31,27 @@ jobs:
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd .
 
-      # 5. Запуск контейнера MSSQL с упрощённой проверкой готовности
+      # 5. Запуск контейнера MSSQL с именем todo_mssql
       - name: Run MSSQL container
         run: |
-          docker run -d --name mssql -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+          docker run -d --name todo_mssql -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
           # Ждём 60 секунд, чтобы MSSQL успел запуститься
           sleep 60
           # Проверяем, что контейнер работает
-          docker ps | grep mssql || (echo "MSSQL container failed to start" && exit 1)
+          docker ps | grep todo_mssql || (echo "MSSQL container failed to start" && exit 1)
           # Проверяем логи на наличие ошибок
-          docker logs mssql | grep "SQL Server is now ready for client connections" || (echo "MSSQL not ready, check logs for errors:" && docker logs mssql && exit 1)
+          docker logs todo_mssql | grep "SQL Server is now ready for client connections" || (echo "MSSQL not ready, check logs for errors:" && docker logs todo_mssql && exit 1)
 
       # 6. Применение миграций (опционально, если нужно)
       - name: Apply database migrations
         run: |
-          docker run --rm --link mssql:mssql -e ConnectionStrings__DefaultConnection="Server=mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
+          docker run --rm --link todo_mssql:todo_mssql -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
         continue-on-error: true
 
       # 7. Запуск контейнера API
       - name: Run API container
         run: |
-          docker run -d --name api -p 8090:8090 --link mssql:mssql -e ConnectionStrings__DefaultConnection="Server=mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
+          docker run -d --name api -p 8090:8090 --link todo_mssql:todo_mssql -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
           # Даём время на запуск API
           sleep 10
 
@@ -76,8 +76,8 @@ jobs:
       - name: Stop and remove containers
         if: always()
         run: |
-          docker stop mssql api blazor || true
-          docker rm mssql api blazor || true
+          docker stop todo_mssql api blazor || true
+          docker rm todo_mssql api blazor || true
 
       # 12. Очистка локальных образов
       - name: Clean up images
