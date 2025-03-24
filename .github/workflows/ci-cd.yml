@@ -31,10 +31,15 @@ jobs:
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd .
 
-      # 5. Запуск контейнера MSSQL с именем todo_mssql
+      # 5. Создание сети todo_network
+      - name: Create Docker network
+        run: |
+          docker network create todo_network || true
+
+      # 6. Запуск контейнера MSSQL в сети todo_network
       - name: Run MSSQL container
         run: |
-          docker run -d --name todo_mssql -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+          docker run -d --name todo_mssql --network todo_network -e ACCEPT_EULA=Y -e SA_PASSWORD=L1234qwer% -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
           # Ждём 60 секунд, чтобы MSSQL успел запуститься
           sleep 60
           # Проверяем, что контейнер работает
@@ -42,44 +47,44 @@ jobs:
           # Проверяем логи на наличие ошибок
           docker logs todo_mssql | grep "SQL Server is now ready for client connections" || (echo "MSSQL not ready, check logs for errors:" && docker logs todo_mssql && exit 1)
 
-      # 6. Применение миграций (опционально, если нужно)
+      # 7. Применение миграций (опционально, если нужно)
       - name: Apply database migrations
         run: |
-          docker run --rm --link todo_mssql:todo_mssql -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
+          docker run --rm --network todo_network -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd dotnet ef database update
         continue-on-error: true
 
-      # 7. Запуск контейнера API
+      # 8. Запуск контейнера API в сети todo_network
       - name: Run API container
         run: |
-          docker run -d --name api -p 8090:8090 --link todo_mssql:todo_mssql -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
+          docker run -d --name api --network todo_network -p 8090:8090 -e ConnectionStrings__DefaultConnection="Server=todo_mssql;Database=ToDoListDb;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True" ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
           # Даём время на запуск API
           sleep 10
 
-      # 8. Запуск контейнера Blazor (подтягиваем образ из Docker Hub)
+      # 9. Запуск контейнера Blazor в сети todo_network
       - name: Run Blazor container
         run: |
-          docker run -d --name blazor -p 8091:8091 ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd
+          docker run -d --name blazor --network todo_network -p 8091:8091 ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd
           # Даём время на запуск Blazor
           sleep 10
 
-      # 9. Проверка работоспособности API
+      # 10. Проверка работоспособности API
       - name: Test API endpoint
         run: |
           curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/swagger || exit 1
 
-      # 10. Проверка работоспособности Blazor
+      # 11. Проверка работоспособности Blazor
       - name: Test Blazor endpoint
         run: |
           curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8091 || exit 1
 
-      # 11. Остановка и удаление контейнеров
+      # 12. Остановка и удаление контейнеров
       - name: Stop and remove containers
         if: always()
         run: |
           docker stop todo_mssql api blazor || true
           docker rm todo_mssql api blazor || true
 
-      # 12. Очистка локальных образов
+      # 13. Очистка локальных образов
       - name: Clean up images
         if: always()
         run: |
@@ -87,7 +92,13 @@ jobs:
           docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/todolist-blazor:ci-cd || true
           docker rmi mcr.microsoft.com/mssql/server:2019-latest || true
 
-      # 13. Пуш образа API на Docker Hub
+      # 14. Удаление сети todo_network
+      - name: Remove Docker network
+        if: always()
+        run: |
+          docker network rm todo_network || true
+
+      # 15. Пуш образа API на Docker Hub
       - name: Push ToDoListAPI image to Docker Hub
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/todolist-api:ci-cd
