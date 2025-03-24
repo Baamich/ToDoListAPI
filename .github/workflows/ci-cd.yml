@@ -1,86 +1,47 @@
-name: CI/CD todolistapi
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ CI/CD ]
-  pull_request:
-    branches: [ CI/CD ]
+    branches:
+      - CI/CD
 
 jobs:
-  build-and-deploy-api:
+  build-and-push:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Чекаут кода из репозитория
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout репозиторий
+        uses: actions/checkout@v4
 
-      # 2. Установка Docker Buildx для сборки образов
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+      - name: Вход в Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-      # 3. Авторизация в Docker Hub
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # 4. Сборка и пуш образа API
-      - name: Build and push todolistapi image
+      - name: Сборка и пуш API
         run: |
-          docker build -t baamich/todolistapi:latest .
-          docker push baamich/todolistapi:latest
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest -f ToDoListAPI/Dockerfile .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest
 
-      # 5. Создание сети todo_network
-      - name: Create Docker network
+      - name: Сборка и пуш Blazor
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest -f ToDoListBlazor/Dockerfile .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest
+
+  test-containers:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Создание сети (если не существует)
         run: docker network create todo_network || true
 
-      # 6. Запуск контейнера MSSQL
-      - name: Run MSSQL container
-        run: docker run -d --name todo_mssql --network todo_network -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=L1234qwer%" -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
-
-      # 7. Ожидание готовности MSSQL (проверка порта 1433)
-      - name: Wait for MSSQL to be ready
+      - name: Запуск контейнеров
         run: |
-          echo "Waiting for MSSQL to be ready on port 1433..."
-          for i in {1..30}; do
-            nc -z todo_mssql 1433 && break
-            echo "MSSQL not ready yet, waiting..."
-            sleep 5
-          done
-          nc -z todo_mssql 1433 || (echo "MSSQL failed to start" && exit 1)
+          docker run -d --name todo_api --network todo_network -p 8090:8090 ${{ secrets.DOCKERHUB_USERNAME }}/todo_api:latest
+          docker run -d --name todo_blazor --network todo_network -p 8091:80 ${{ secrets.DOCKERHUB_USERNAME }}/todo_blazor:latest
 
-      # 8. Запуск контейнера API на порту 8090:80
-      - name: Run todolistapi container
-        run: docker run -d --name todolistapi --network todo_network -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" -p 8090:80 baamich/todolistapi:latest
-
-      # 9. Проверка состояния контейнеров
-      - name: Check container status
+      - name: Проверка API
         run: |
-          docker ps -a
-          docker inspect todo_mssql
-          docker inspect todolistapi
+          sleep 10
+          curl -f http://todo_api:8090/api/tasks/health || exit 1
+          curl -f http://todo_blazor:80 || exit 1
 
-      # 10. Вывод логов контейнеров для отладки
-      - name: Show MSSQL container logs
-        run: docker logs todo_mssql
-
-      - name: Show API container logs
-        run: docker logs todolistapi
-
-      # 11. Ожидание запуска API
-      - name: Wait for API to be ready
-        run: sleep 30
-
-      # 12. Проверка эндпойнта API на порту 8090
-      - name: Test API endpoint
-        run: curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/tasks || exit 1
-
-      # 13. Очистка после тестов
-      - name: Cleanup containers
-        if: always()
-        run: |
-          docker stop todolistapi todo_mssql || true
-          docker rm -f todolistapi todo_mssql || true
-          docker network rm todo_network || true
+      - name: Остановка и очистка контейнеров
+        run: docker stop todo_api todo_blazor && docker rm todo_api todo_blazor
