@@ -34,18 +34,11 @@ jobs:
 
       # 5. Создание сети todo_network
       - name: Create Docker network
-        run: |
-          docker network create todo_network || true
+        run: docker network create todo_network || true
 
       # 6. Запуск контейнера MSSQL
       - name: Run MSSQL container
-        run: |
-          docker run -d --name todo_mssql \
-            --network todo_network \
-            -e "ACCEPT_EULA=Y" \
-            -e "SA_PASSWORD=L1234qwer%" \
-            -p 1433:1433 \
-            mcr.microsoft.com/mssql/server:2019-latest
+        run: docker run -d --name todo_mssql --network todo_network -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=L1234qwer%" -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
 
       # 7. Ожидание готовности MSSQL
       - name: Wait for MSSQL to be ready
@@ -60,12 +53,7 @@ jobs:
 
       # 8. Запуск контейнера API на порту 8090:80
       - name: Run todolistapi container
-        run: |
-          docker run -d --name todolistapi \
-            --network todo_network \
-            -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" \
-            -p 8090:80 \
-            baamich/todolistapi:latest
+        run: docker run -d --name todolistapi --network todo_network -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" -p 8090:80 baamich/todolistapi:latest
 
       # 9. Проверка состояния контейнеров
       - name: Check container status
@@ -76,11 +64,10 @@ jobs:
 
       # 10. Вывод логов контейнеров для отладки
       - name: Show MSSQL container logs
-        run: |
-          docker logs todo_mssql
+        run: docker logs todo_mssql
+
       - name: Show API container logs
-        run: |
-          docker logs todolistapi
+        run: docker logs todolistapi
 
       # 11. Ожидание запуска API
       - name: Wait for API to be ready
@@ -88,8 +75,7 @@ jobs:
 
       # 12. Проверка эндпойнта API на порту 8090
       - name: Test API endpoint
-        run: |
-          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/tasks || exit 1
+        run: curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/tasks || exit 1
 
       # 13. Очистка после тестов
       - name: Cleanup containers
