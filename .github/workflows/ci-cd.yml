@@ -40,16 +40,16 @@ jobs:
       - name: Run MSSQL container
         run: docker run -d --name todo_mssql --network todo_network -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=L1234qwer%" -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
 
-      # 7. Ожидание готовности MSSQL
+      # 7. Ожидание готовности MSSQL (проверка порта 1433)
       - name: Wait for MSSQL to be ready
         run: |
-          echo "Waiting for MSSQL to be ready..."
+          echo "Waiting for MSSQL to be ready on port 1433..."
           for i in {1..30}; do
-            docker exec todo_mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "L1234qwer%" -Q "SELECT 1" && break
+            nc -z todo_mssql 1433 && break
             echo "MSSQL not ready yet, waiting..."
             sleep 5
           done
-          docker exec todo_mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "L1234qwer%" -Q "SELECT 1" || (echo "MSSQL failed to start" && exit 1)
+          nc -z todo_mssql 1433 || (echo "MSSQL failed to start" && exit 1)
 
       # 8. Запуск контейнера API на порту 8090:80
       - name: Run todolistapi container
