@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ToDoListAPI.Data;
-using ToDoListAPI.Models; // Для SmtpSettings
-using Microsoft.Extensions.Options; // Для IOptions
+using ToDoListAPI.Models;
+using ToDoListAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,7 +18,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowBlazor", builder =>
     {
-        builder.WithOrigins("http://localhost:8091") 
+        builder.WithOrigins("http://localhost:8091")
                .AllowAnyMethod()
                .AllowAnyHeader();
     });
@@ -32,7 +32,28 @@ builder.Services.AddSwaggerGen();
 // Регистрируем SmtpSettings из appsettings.json
 builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpSettings"));
 
+// Регистрируем сервис WebSocket
+builder.Services.AddSingleton<WebSocketService>();
+
 var app = builder.Build();
+
+// Включаем поддержку WebSocket
+app.UseWebSockets();
+
+// Настраиваем endpoint для WebSocket
+app.Map("/ws", async context =>
+{
+    if (context.WebSockets.IsWebSocketRequest)
+    {
+        var wsService = context.RequestServices.GetRequiredService<WebSocketService>();
+        using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+        await wsService.HandleWebSocket(webSocket);
+    }
+    else
+    {
+        context.Response.StatusCode = 400;
+    }
+});
 
 // Настраиваем middleware
 app.UseSwagger();
