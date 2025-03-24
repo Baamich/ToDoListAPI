@@ -11,52 +11,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Чекаут кода
+      # 1. Чекаут кода из репозитория
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. Настройка Docker Buildx
+      # 2. Установка Docker Buildx для сборки образов
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      # 3. Логин в Docker Hub
+      # 3. Авторизация в Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 4. Сборка и пуш образа для todolistapi
-      - name: Build and push todolistapi Docker image
+      # 4. Сборка и пуш образа API
+      - name: Build and push todolistapi image
         run: |
-          docker build -t yourusername/todolistapi:latest .
-          docker push yourusername/todolistapi:latest
+          docker build -t baamich/todolistapi:latest .
+          docker push baamich/todolistapi:latest
 
-      # 5. Запуск API контейнера
+      # 5. Запуск контейнера API на порту 8090:8090
       - name: Run todolistapi container
         run: |
           docker run -d --name todolistapi \
             -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" \
-            -p 5000:80 \
-            yourusername/todolistapi:latest
+            -p 8090:8090 \
+            baamich/todolistapi:latest
 
-      # 6. Ожидание готовности контейнера
+      # 6. Ожидание запуска сервиса
       - name: Wait for API to be ready
-        run: |
-          sleep 20  # Даем время на запуск сервиса
+        run: sleep 20
 
-      # 7. Проверка работоспособности через curl
+      # 7. Проверка эндпойнта API на порту 8090
       - name: Test API endpoint
         run: |
-          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:5000/api/health || exit 1
+          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/health || exit 1
 
-      # 8. Остановка и удаление контейнера
+      # 8. Очистка после тестов
       - name: Cleanup API container
         if: always()
         run: |
           docker stop todolistapi || true
           docker rm -f todolistapi || true
-
-    env:
-      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
