@@ -47,7 +47,18 @@ jobs:
             -p 1433:1433 \
             mcr.microsoft.com/mssql/server:2019-latest
 
-      # 7. Запуск контейнера API на порту 8090:80
+      # 7. Ожидание готовности MSSQL
+      - name: Wait for MSSQL to be ready
+        run: |
+          echo "Waiting for MSSQL to be ready..."
+          for i in {1..30}; do
+            docker exec todo_mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "L1234qwer%" -Q "SELECT 1" && break
+            echo "MSSQL not ready yet, waiting..."
+            sleep 5
+          done
+          docker exec todo_mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "L1234qwer%" -Q "SELECT 1" || (echo "MSSQL failed to start" && exit 1)
+
+      # 8. Запуск контейнера API на порту 8090:80
       - name: Run todolistapi container
         run: |
           docker run -d --name todolistapi \
@@ -56,7 +67,14 @@ jobs:
             -p 8090:80 \
             baamich/todolistapi:latest
 
-      # 8. Вывод логов контейнеров для отладки
+      # 9. Проверка состояния контейнеров
+      - name: Check container status
+        run: |
+          docker ps -a
+          docker inspect todo_mssql
+          docker inspect todolistapi
+
+      # 10. Вывод логов контейнеров для отладки
       - name: Show MSSQL container logs
         run: |
           docker logs todo_mssql
@@ -64,16 +82,16 @@ jobs:
         run: |
           docker logs todolistapi
 
-      # 9. Ожидание запуска сервисов
-      - name: Wait for services to be ready
-        run: sleep 60  # Увеличиваем время, чтобы MSSQL успел запуститься
+      # 11. Ожидание запуска API
+      - name: Wait for API to be ready
+        run: sleep 30
 
-      # 10. Проверка эндпойнта API на порту 8090
+      # 12. Проверка эндпойнта API на порту 8090
       - name: Test API endpoint
         run: |
           curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/tasks || exit 1
 
-      # 11. Очистка после тестов
+      # 13. Очистка после тестов
       - name: Cleanup containers
         if: always()
         run: |
