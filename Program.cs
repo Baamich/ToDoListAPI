@@ -10,8 +10,8 @@ var port = Environment.GetEnvironmentVariable("PORT") ?? "8090";
 builder.WebHost.UseUrls($"http://+:{port}");
 
 // Подключение к базе данных
-//builder.Services.AddDbContext<AppDbContext>(options =>
-//    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Настройка CORS
 builder.Services.AddCors(options =>

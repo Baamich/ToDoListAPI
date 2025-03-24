@@ -32,31 +32,51 @@ jobs:
           docker build -t baamich/todolistapi:latest .
           docker push baamich/todolistapi:latest
 
-      # 5. Запуск контейнера API на порту 8090:80
+      # 5. Создание сети todo_network
+      - name: Create Docker network
+        run: |
+          docker network create todo_network || true
+
+      # 6. Запуск контейнера MSSQL
+      - name: Run MSSQL container
+        run: |
+          docker run -d --name todo_mssql \
+            --network todo_network \
+            -e "ACCEPT_EULA=Y" \
+            -e "SA_PASSWORD=L1234qwer%" \
+            -p 1433:1433 \
+            mcr.microsoft.com/mssql/server:2019-latest
+
+      # 7. Запуск контейнера API на порту 8090:80
       - name: Run todolistapi container
         run: |
           docker run -d --name todolistapi \
+            --network todo_network \
             -e "ConnectionStrings__DefaultConnection=Server=todo_mssql,1433;Database=ToDoListDB;User Id=sa;Password=L1234qwer%;TrustServerCertificate=True;" \
             -p 8090:80 \
             baamich/todolistapi:latest
 
-      # 6. Вывод логов контейнера для отладки
-      - name: Show container logs
+      # 8. Вывод логов контейнеров для отладки
+      - name: Show MSSQL container logs
+        run: |
+          docker logs todo_mssql
+      - name: Show API container logs
         run: |
           docker logs todolistapi
 
-      # 7. Ожидание запуска сервиса
-      - name: Wait for API to be ready
-        run: sleep 30
+      # 9. Ожидание запуска сервисов
+      - name: Wait for services to be ready
+        run: sleep 60  # Увеличиваем время, чтобы MSSQL успел запуститься
 
-      # 8. Проверка эндпойнта API на порту 8090
+      # 10. Проверка эндпойнта API на порту 8090
       - name: Test API endpoint
         run: |
-          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/tasks/health || exit 1
+          curl --retry 5 --retry-delay 5 --retry-max-time 30 -f http://localhost:8090/api/tasks || exit 1
 
-      # 9. Очистка после тестов
-      - name: Cleanup API container
+      # 11. Очистка после тестов
+      - name: Cleanup containers
         if: always()
         run: |
-          docker stop todolistapi || true
-          docker rm -f todolistapi || true
+          docker stop todolistapi todo_mssql || true
+          docker rm -f todolistapi todo_mssql || true
+          docker network rm todo_network || true
