@@ -27,7 +27,7 @@ jobs:
 
       - name: Build Docker image for ToDoListAPI
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolistapi:latest -f ToDoListAPI/Dockerfile ./ToDoListAPI
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/todolistapi:latest .  # Убрали -f, так как файл называется Dockerfile
 
       - name: Create Docker network and run containers
         run: |
